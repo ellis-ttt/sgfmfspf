@@ -1,96 +1,49 @@
-name: Deploy
+name: 🐥 ssh-action-deploy
 
 on:
   push:
-    branches: [ master ]
+    branches: [ "action" ]
   pull_request:
-    branches: [ master ]
-    types: [closed]
+    branches: [ "action" ]
 
 jobs:
-  deploy:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged)
+  build:
+    name: 🕳️ Ubuntu...
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up environment variables
-        run: |
-          echo "APP_VERSION=$(date +%Y%m%d.%H%M%S)" >> $GITHUB_ENV
-          echo "DEPLOY_PATH=/var/www/sgfmfspf" >> $GITHUB_ENV
-
-      - name: Install SSH key
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: 💞 Github actions...
+        uses: actions/checkout@v3
+      - name: 🌈 Deploy with ssh...
+        uses: sebastianjnuwu/ssh-action-deploy@v4
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add server to known hosts
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          touch ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-          # Extract host and port from SSH_HOST
-          SSH_HOST="${{ secrets.SSH_HOST }}"
-          SSH_PORT=22
-
-          # Handle custom port if specified (host:port format)
-          if [[ "$SSH_HOST" =~ :[0-9]+$ ]]; then
-            IFS=":" read -r HOST PORT <<< "$SSH_HOST"
-            SSH_HOST="$HOST"
-            SSH_PORT="$PORT"
-          fi
-
-          # Verify network connectivity
-          if ! timeout 5 bash -c "cat < /dev/null > /dev/tcp/$SSH_HOST/$SSH_PORT"; then
-            echo "🚨 ERROR: Cannot connect to $SSH_HOST on port $SSH_PORT"
-            echo "Check your network, firewall, and SSH host configuration"
-            exit 1
-          fi
-
-          # Add to known hosts
-          ssh-keyscan -H -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
-
-      - name: Run deployment commands
-        run: |
-          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
-          cd $DEPLOY_PATH
-          
-          # Maintenance mode (prevents user access during update)
-          php artisan down --secret="secret-token-$(date +%s)" || true
-          
-          # Update code - use main branch consistently
-          git fetch origin main
-          git reset --hard origin/main
-          
-          # Install dependencies
-          composer install --no-dev --optimize-autoloader
-          
-          # Update database
-          php artisan migrate --force
-          
-          # Clear caches
-          php artisan config:clear
-          php artisan cache:clear
-          php artisan view:clear
-          
-          # Optimize for production
-          php artisan config:cache
-          php artisan route:cache
-          php artisan view:cache
-          
-          # Fix permissions
-          sudo chown -R deployer:www-data .
-          sudo chmod -R 775 storage bootstrap/cache
-          
-          # Restart services
-          sudo systemctl restart php8.1-fpm
-          sudo systemctl restart caddy
-          sudo systemctl restart laravel-worker
-          
-          # Bring application back up
-          php artisan up
-          EOF
+          IP: ${{ secrets.SSH_HOST }}
+          USER: ${{ secrets.SSH_USER }}
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          FOLDER: "/root/.deploy"
+          RUN: "
+            cd /var/www/sgfmfspf
+            
+            git fetch origin master
+            git reset --hard origin/master
+            
+            composer install --no-dev --optimize-autoloader
+   
+            php artisan migrate --force
+            
+            php artisan config:clear
+            php artisan cache:clear
+            php artisan view:clear
+  
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+  
+            sudo chown -R deployer:www-data .
+            sudo chmod -R 775 storage bootstrap/cache
+  
+            sudo systemctl restart php8.1-fpm
+            sudo systemctl restart caddy
+            sudo systemctl restart laravel-worker
+  
+            php artisan up
+          "
