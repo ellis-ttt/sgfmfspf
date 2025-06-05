@@ -29,7 +29,30 @@ jobs:
       - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          chmod 700 ~/.ssh
+          touch ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          # Extract host and port from SSH_HOST
+          SSH_HOST="${{ secrets.SSH_HOST }}"
+          SSH_PORT=22
+
+          # Handle custom port if specified (host:port format)
+          if [[ "$SSH_HOST" =~ :[0-9]+$ ]]; then
+            IFS=":" read -r HOST PORT <<< "$SSH_HOST"
+            SSH_HOST="$HOST"
+            SSH_PORT="$PORT"
+          fi
+
+          # Verify network connectivity
+          if ! timeout 5 bash -c "cat < /dev/null > /dev/tcp/$SSH_HOST/$SSH_PORT"; then
+            echo "🚨 ERROR: Cannot connect to $SSH_HOST on port $SSH_PORT"
+            echo "Check your network, firewall, and SSH host configuration"
+            exit 1
+          fi
+
+          # Add to known hosts
+          ssh-keyscan -H -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
 
       - name: Run deployment commands
         run: |
@@ -39,7 +62,7 @@ jobs:
           # Maintenance mode (prevents user access during update)
           php artisan down --secret="secret-token-$(date +%s)" || true
           
-          # Update code
+          # Update code - use main branch consistently
           git fetch origin main
           git reset --hard origin/main
           
