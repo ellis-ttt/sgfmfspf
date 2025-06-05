@@ -1,42 +1,73 @@
-name: Deploy to Sprinthost
+name: Deploy
 
 on:
   push:
-    branches: ["master"]
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+    types: [closed]
 
 jobs:
   deploy:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          extensions: mbstring, ctype, fileinfo, openssl, pdo_mysql, tokenizer # Laravel extensions
-
-      - name: Install dependencies
+      - name: Set up environment variables
         run: |
-          composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
-          cp .env.example .env
-          php artisan key:generate
+          echo "APP_VERSION=$(date +%Y%m%d.%H%M%S)" >> $GITHUB_ENV
+          echo "DEPLOY_PATH=/var/www/your-app" >> $GITHUB_ENV
 
-      - name: Upload via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./
-          server-dir: ${{ secrets.REMOTE_DIR }}
-          exclude: |
-            .git*
-            .github/
-            .env
-            storage/
-            tests/
-            node_modules/
-            *.md
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Run deployment commands
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          cd $DEPLOY_PATH
+          
+          # Maintenance mode (prevents user access during update)
+          php artisan down --secret="secret-token-$(date +%s)" || true
+          
+          # Update code
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # Install dependencies
+          composer install --no-dev --optimize-autoloader
+          
+          # Update database
+          php artisan migrate --force
+          
+          # Clear caches
+          php artisan config:clear
+          php artisan cache:clear
+          php artisan view:clear
+          
+          # Optimize for production
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          
+          # Fix permissions
+          sudo chown -R deployer:www-data .
+          sudo chmod -R 775 storage bootstrap/cache
+          
+          # Restart services
+          sudo systemctl restart php8.1-fpm
+          sudo systemctl restart caddy
+          sudo systemctl restart laravel-worker
+          
+          # Bring application back up
+          php artisan up
+          EOF
