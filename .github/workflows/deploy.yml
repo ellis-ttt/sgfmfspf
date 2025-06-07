@@ -1,49 +1,22 @@
-name: 🐥 ssh-action-deploy
+name: deploy
 
 on:
-  push:
-    branches: [ "action" ]
-  pull_request:
-    branches: [ "action" ]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: 🕳️ Ubuntu...
+    name: Build
     runs-on: ubuntu-latest
     steps:
-      - name: 💞 Github actions...
-        uses: actions/checkout@v3
-      - name: 🌈 Deploy with ssh...
-        uses: sebastianjnuwu/ssh-action-deploy@v4
+      - name: Execute remote SSH commands using password
+        uses: appleboy/ssh-action@v1
         with:
-          IP: ${{ secrets.SSH_HOST }}
-          USER: ${{ secrets.SSH_USER }}
-          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          FOLDER: "/root/.deploy"
-          RUN: "
-            cd /var/www/sgfmfspf
-            
-            git fetch origin master
-            git reset --hard origin/master
-            
+          host: ${{ secrets.HOST }}
+          username: deployer
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull origin master
             composer install --no-dev --optimize-autoloader
-   
-            php artisan migrate --force
-            
-            php artisan config:clear
-            php artisan cache:clear
-            php artisan view:clear
-  
-            php artisan config:cache
-            php artisan route:cache
-            php artisan view:cache
-  
-            sudo chown -R deployer:www-data .
-            sudo chmod -R 775 storage bootstrap/cache
-  
-            sudo systemctl restart php8.1-fpm
+            bun run build
             sudo systemctl restart caddy
-            sudo systemctl restart laravel-worker
-  
-            php artisan up
-          "
